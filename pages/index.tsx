@@ -1,86 +1,261 @@
-import type { NextPage } from 'next'
-import Head from 'next/head'
-import Image from 'next/image'
+import Head from "next/head";
+import Web3Modal from "web3modal";
+import { providers, Contract } from "ethers";
+import { useEffect, useRef, useState } from "react";
 
-const Home: NextPage = () => {
+const WHITELIST_CONTRACT_ADDRESS = "0xaE1218AbcdEAB3b963342990928A5CaD83c4e6C0"
+const abi = [
+    {
+      "inputs": [
+        {
+          "internalType": "uint8",
+          "name": "_maxWhitelistedAddresses",
+          "type": "uint8"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "addAddressToWhitelist",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "maxWhitelistedAddresses",
+      "outputs": [
+        {
+          "internalType": "uint8",
+          "name": "",
+          "type": "uint8"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "numAddressesWhitelisted",
+      "outputs": [
+        {
+          "internalType": "uint8",
+          "name": "",
+          "type": "uint8"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "whitelistedAddresses",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ];
+
+export default function Home() {
+  const [walletConnected, setWalletConnected] = useState(false);
+  const [joinedWhitelist, setJoinedWhitelist] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [numberOfWhitelisted, setNumberOfWhitelisted] = useState(0);
+  // Create a reference to the Web3 Modal (used for connecting to Metamask) which persists as long as the page is open
+  const web3ModalRef = useRef<Web3Modal>();
+
+  /**
+   * Returns a Provider or Signer object representing the Ethereum RPC with or without the
+   * signing capabilities of metamask attached
+   *
+   * A `Provider` is needed to interact with the blockchain - reading transactions, reading balances, reading state, etc.
+   *
+   * A `Signer` is a special type of Provider used in case a `write` transaction needs to be made to the blockchain, which involves the connected account
+   * needing to make a digital signature to authorize the transaction being sent. Metamask exposes a Signer API to allow your website to
+   * request signatures from the user using Signer functions.
+   */
+  const getProviderOrSigner = async (needSigner = false) => {
+    if(!web3ModalRef.current) {
+      return;
+    }
+    const provider = await web3ModalRef.current.connect();
+    const web3Provider = new providers.Web3Provider(provider);
+
+    const { chainId } = await web3Provider.getNetwork();
+    if (chainId !== 4) {
+      throw new Error("Change network to Rinkeby");
+    }
+
+    if (needSigner) {
+      return web3Provider.getSigner();
+    }
+    return web3Provider;
+  };
+
+  /**
+   * addAddressToWhitelist: Adds the current connected address to the whitelist
+   */
+  const addAddressToWhitelist = async () => {
+    try {
+      const signer = await getProviderOrSigner(true);
+      const whitelistContract = new Contract(
+        WHITELIST_CONTRACT_ADDRESS,
+        abi,
+        signer
+      );
+      const tx = await whitelistContract.addAddressToWhitelist();
+      setLoading(true);
+      // wait for the transaction to get mined
+      await tx.wait();
+      setLoading(false);
+      // get the updated number of addresses in the whitelist
+      await getNumberOfWhitelisted();
+      setJoinedWhitelist(true);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /**
+   * getNumberOfWhitelisted:  gets the number of whitelisted addresses
+   */
+  const getNumberOfWhitelisted = async () => {
+    try {
+      const provider = await getProviderOrSigner();
+      const whitelistContract = new Contract(
+        WHITELIST_CONTRACT_ADDRESS,
+        abi,
+        provider
+      );
+      // call the numAddressesWhitelisted from the contract
+      const _numberOfWhitelisted = await whitelistContract.numAddressesWhitelisted();
+      setNumberOfWhitelisted(_numberOfWhitelisted);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /**
+   * checkIfAddressInWhitelist: Checks if the address is in whitelist
+   */
+  const checkIfAddressInWhitelist = async () => {
+    try {
+      const signer = await getProviderOrSigner(true);
+      const whitelistContract = new Contract(
+        WHITELIST_CONTRACT_ADDRESS,
+        abi,
+        signer
+      );
+      const address = await signer.getAddress();
+      const _joinedWhitelist = await whitelistContract.whitelistedAddresses(
+        address
+      );
+      setJoinedWhitelist(_joinedWhitelist);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /*
+    connectWallet: Connects the MetaMask wallet
+  */
+  const connectWallet = async () => {
+    try {
+      await getProviderOrSigner();
+      setWalletConnected(true);
+
+      checkIfAddressInWhitelist();
+      getNumberOfWhitelisted();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /*
+    renderButton: Returns a button based on the state of the dapp
+  */
+  const renderButton = () => {
+  if (!walletConnected) {
+      return (
+        <button onClick={connectWallet} className="bg-blue-600 text-white">
+          Connect your wallet
+        </button>
+      );
+  }
+    if (joinedWhitelist) {
+      return (
+        <div className="">
+          Thanks for joining the Whitelist!
+        </div>
+      );
+    } else if (loading) {
+      return <button className="">Loading...</button>;
+    } else {
+      return (
+        <button onClick={addAddressToWhitelist} className="">
+          Join the Whitelist
+        </button>
+      );
+    }
+  };
+
+  // useEffects are used to react to changes in state of the website
+  // The array at the end of function call represents what state changes will trigger this effect
+  // In this case, whenever the value of `walletConnected` changes - this effect will be called
+  useEffect(() => {
+    // if wallet is not connected, create a new instance of Web3Modal and connect the MetaMask wallet
+    if (!walletConnected) {
+      // Assign the Web3Modal class to the reference object by setting it's `current` value
+      // The `current` value is persisted throughout as long as this page is open
+      web3ModalRef.current = new Web3Modal({
+        network: "rinkeby",
+        providerOptions: {},
+        disableInjectedProvider: false,
+      });
+      connectWallet();
+    }
+  }, [walletConnected]);
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center py-2">
+    <div>
       <Head>
-        <title>Create Next App</title>
+        <title>Whitelist Dapp</title>
+        <meta name="description" content="Whitelist-Dapp" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-
-      <main className="flex w-full flex-1 flex-col items-center justify-center px-20 text-center">
-        <h1 className="text-6xl font-bold">
-          Welcome to{' '}
-          <a className="text-blue-600" href="https://nextjs.org">
-            Next.js!
-          </a>
-        </h1>
-
-        <p className="mt-3 text-2xl">
-          Get started by editing{' '}
-          <code className="rounded-md bg-gray-100 p-3 font-mono text-lg">
-            pages/index.tsx
-          </code>
-        </p>
-
-        <div className="mt-6 flex max-w-4xl flex-wrap items-center justify-around sm:w-full">
-          <a
-            href="https://nextjs.org/docs"
-            className="mt-6 w-96 rounded-xl border p-6 text-left hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Documentation &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Find in-depth information about Next.js features and its API.
-            </p>
-          </a>
-
-          <a
-            href="https://nextjs.org/learn"
-            className="mt-6 w-96 rounded-xl border p-6 text-left hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Learn &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Learn about Next.js in an interactive course with quizzes!
-            </p>
-          </a>
-
-          <a
-            href="https://github.com/vercel/next.js/tree/canary/examples"
-            className="mt-6 w-96 rounded-xl border p-6 text-left hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Examples &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Discover and deploy boilerplate example Next.js projects.
-            </p>
-          </a>
-
-          <a
-            href="https://vercel.com/import?filter=next.js&utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className="mt-6 w-96 rounded-xl border p-6 text-left hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Deploy &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
+      <div className="p-4 flex flex-row items-center">
+        <div>
+          <h1 className="">Welcome to Crypto Devs!</h1>
+          <div className="">
+            Its an NFT collection for developers in Crypto.
+          </div>
+          <div className="">
+            {numberOfWhitelisted} have already joined the Whitelist
+          </div>
+          {renderButton()}
         </div>
-      </main>
+        <div>
+          <img className="" src="./crypto-devs.svg" />
+        </div>
+      </div>
 
-      <footer className="flex h-24 w-full items-center justify-center border-t">
-        <a
-          className="flex items-center justify-center gap-2"
-          href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Powered by{' '}
-          <Image src="/vercel.svg" alt="Vercel Logo" width={72} height={16} />
-        </a>
+      <footer className="">
+        Made with &#10084; by Crypto Devs
       </footer>
     </div>
-  )
+  );
 }
-
-export default Home
